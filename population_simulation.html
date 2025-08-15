@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Population Dynamics Simulation</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    .animate-fadeIn {
+      animation: fadeIn 1s ease-in-out;
+    }
+    .animate-fadeInDelay {
+      animation: fadeIn 0.5s ease-in-out forwards;
+      opacity: 0;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .cursor-not-allowed {
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    'use strict';
+
+    // A reusable component to render text and highlight keywords.
+    const KeywordText = ({ text, keywords }) => {
+      if (!text) {
+        return null;
+      }
+
+      const sortedKeywords = [...keywords].sort((a, b) => b.length - a.length);
+      const regexPattern = new RegExp(`(${sortedKeywords.join('|')})`, 'gi');
+      const parts = text.split(regexPattern);
+
+      return React.createElement(
+        'p',
+        { className: 'text-gray-300 text-center max-w-2xl mx-auto' },
+        parts.map((part, index) => {
+          const isKeyword = sortedKeywords.some(keyword => keyword.toLowerCase() === part.toLowerCase());
+          if (isKeyword) {
+            return React.createElement('span', { key: index, className: 'font-bold text-teal-300' }, part);
+          }
+          return React.createElement('span', { key: index }, part);
+        })
+      );
+    };
+
+    // The main App component that manages the application state and renders the simulation.
+    const App = () => {
+      const [stage, setStage] = React.useState('sandbox');
+      const [userAnswer, setUserAnswer] = React.useState(null);
+      const [feedback, setFeedback] = React.useState({ message: '', isCorrect: false });
+      const [canContinue, setCanContinue] = React.useState(false);
+      const [visiblePopulation, setVisiblePopulation] = React.useState(0);
+      const [visiblePredators, setVisiblePredators] = React.useState(0);
+      const [animationSpeed, setAnimationSpeed] = React.useState(500);
+      const [zoomLevel, setZoomLevel] = React.useState(1.0);
+      const [sandboxSettings, setSandboxSettings] = React.useState({
+        initialPop: 20,
+        food: 'abundant',
+        predators: 'absent',
+        catastrophe: false,
+      });
+      const canvasRef = React.useRef(null);
+
+      const stagesData = {
+        'intro-concept': {
+            title: 'Understanding a Population',
+            text: "Before we begin, let's define a population. It's a group of individuals of the same species living in the same area. The population density is how crowded they are, and the population distribution is how they are spread out. When they spread out, the rabbits will find it harder to find mates, and the fox will find it harder to hunt the rabbits. What is the difference between density and distribution?",
+            keywords: ["population", "population density", "population distribution"],
+            question: "A population of rabbits is all huddled in one small corner of the forest. This describes their:",
+            options: ["Distribution", "Density", "Carrying Capacity"],
+            correctAnswer: "Density",
+            populationData: { rabbits: [], predators: [] },
+            carryingCapacity: null,
+            axisLabel: { y: '' }
+        },
+        'intro': {
+          title: 'A New Beginning in the Forest',
+          text: "A small group of rabbits is introduced into a large, healthy forest with no natural predators. With abundant food and space, the population grows rapidly over time. What type of growth is this?",
+          keywords: ["population", "grows rapidly", "Exponential Growth"],
+          question: "This population growth is called:",
+          options: ["Logistic Growth", "Exponential Growth", "Carrying Capacity"],
+          correctAnswer: "Exponential Growth",
+          populationData: { rabbits: [10, 15, 22, 33, 50, 75, 112, 168, 252, 378], predators: [] },
+          carryingCapacity: null,
+          axisLabel: { y: 'Rabbit Population' }
+        },
+        'stage1': {
+          title: 'Reaching a Limit: Carrying Capacity',
+          text: "The forest can only support so many rabbits. The maximum number of individuals of a species that an environment can sustain is called its carrying capacity. As the rabbit population approaches this limit, its growth rate slows down. What is the carrying capacity?",
+          keywords: ["Carrying Capacity"],
+          question: "Carrying capacity is the maximum population an environment can sustain. Which of these is a factor that determines carrying capacity?",
+          options: ["The number of other populations in the area", "The amount of available water and food", "The average age of the population"],
+          correctAnswer: "The amount of available water and food",
+          populationData: { rabbits: [10, 18, 30, 48, 70, 85, 95, 98, 100, 100], predators: [] },
+          carryingCapacity: 100,
+          axisLabel: { y: 'Rabbit Population' }
+        },
+        'stage2': {
+          title: 'Predators Arrive and Stability',
+          text: "After a few months, a small family of foxes moves into the forest. The foxes begin to prey on the rabbits. Now, the rabbit population fluctuates around the carrying capacity. When the population is stable, what happens to the birth and death rates?",
+          keywords: ["population", "stable", "birth and death rates"],
+          question: "When a population is stable, its growth rate is close to zero. This is because:",
+          options: ["The birth rate is much higher than the death rate.", "The death rate is much higher than the birth rate.", "The birth rate is roughly equal to the death rate."],
+          correctAnswer: "The birth rate is roughly equal to the death rate.",
+          populationData: { rabbits: [100, 95, 105, 98, 102, 99, 101, 97, 103, 100], predators: [9, 8, 10, 9, 10, 9, 10, 9, 10, 10] },
+          carryingCapacity: 100,
+          axisLabel: { y: 'Population' }
+        },
+        'stage2-intro': {
+            title: 'Understanding Limiting Factors',
+            text: "The foxes are a **density-dependent factor** because their impact on the rabbit population depends on how dense (or large) the population is. A disease, or competition for food, are also density-dependent factors. A **density-independent factor**, on the other hand, is an event that affects a population regardless of its size. For example, a severe storm, a flood, or a wildfire can reduce a population whether it's large or small.",
+            keywords: ["density-dependent factor", "density-independent factor", "disease", "competition", "wildfire"],
+            question: null,
+            options: null,
+            correctAnswer: null,
+            populationData: { rabbits: [100, 95, 105, 98, 102, 99, 101, 97, 103, 100], predators: [9, 8, 10, 9, 10, 9, 10, 9, 10, 10] },
+            carryingCapacity: 100,
+            axisLabel: { y: 'Population' }
+        },
+        'stage3': {
+          title: 'A Sudden Change: Forest Fire',
+          text: "A lightning strike causes a sudden forest fire. The fire burns a large area of the forest, destroying habitat and killing many rabbits, regardless of how many were in the area. What type of factor is this?",
+          keywords: ["Density-Independent Factor"],
+          question: "The forest fire is an example of a:",
+          options: ["Biotic Factor", "Density-Dependent Factor", "Density-Independent Factor"],
+          correctAnswer: "Density-Independent Factor",
+          populationData: { rabbits: [100, 95, 80, 50, 45, 40, 35, 30, 25, 20], predators: [9, 8, 7, 5, 4, 3, 2, 1, 1, 1] },
+          carryingCapacity: 100,
+          axisLabel: { y: 'Population' }
+        },
+        'conclusion': {
+          title: 'Summary: What We Learned',
+          text: "Great job! You've successfully navigated the challenges of the forest. You learned that a population is a group of the same species in an area, with density being how crowded they are and distribution being their pattern of spacing. Exponential Growth happens with unlimited resources, Logistic Growth occurs as a population reaches its Carrying Capacity, and that a Density-Dependent Factor (like predators) affects a population based on its size, while a Density-Independent Factor (like a fire) affects a population regardless of its size. When a population is stable, its birth and death rates are roughly equal. Feel free to go back and review the concepts in the Sandbox!",
+          keywords: ["population", "density", "distribution", "Exponential Growth", "Logistic Growth", "Carrying Capacity", "Density-Dependent Factor", "Density-Independent Factor", "stable"],
+          question: null,
+          options: null,
+          correctAnswer: null,
+          populationData: { rabbits: [], predators: [] },
+          carryingCapacity: null,
+          axisLabel: { y: '' }
+        },
+        'quiz-1': {
+            title: 'Final Quiz: Question 1',
+            text: "What concept is illustrated by this graph, which shows a population growing slowly and then suddenly dying off?",
+            keywords: [],
+            question: "Which of the following describes this growth pattern?",
+            options: ["Exponential Growth", "Density-Dependent Factor", "Density-Independent Factor"],
+            correctAnswer: "Density-Independent Factor",
+            populationData: { rabbits: [10, 12, 15, 18, 22, 27, 33, 40, 5, 2] },
+            carryingCapacity: null,
+            axisLabel: { y: 'Population' }
+        },
+        'quiz-2': {
+            title: 'Final Quiz: Question 2',
+            text: "This graph shows a population growing rapidly with unlimited resources and no predators. What concept is this?",
+            keywords: [],
+            question: "What type of growth is shown here?",
+            options: ["Logistic Growth", "Carrying Capacity", "Exponential Growth"],
+            correctAnswer: "Exponential Growth",
+            populationData: { rabbits: [10, 15, 22, 33, 50, 75, 112, 168, 252, 378], predators: [] },
+            carryingCapacity: null,
+            axisLabel: { y: 'Population' }
+        },
+        'quiz-3': {
+            title: 'Final Quiz: Question 3',
+            text: "The graph below shows a population whose growth rate is limited by the environment. What concept is shown?",
+            keywords: [],
+            question: "The dashed red line on the graph represents:",
+            options: ["Exponential Growth", "Carrying Capacity", "Population Density"],
+            correctAnswer: "Carrying Capacity",
+            populationData: { rabbits: [10, 18, 30, 48, 70, 85, 95, 98, 100, 100], predators: [] },
+            carryingCapacity: 100,
+            axisLabel: { y: 'Population' }
+        },
+        'quiz-complete': {
+            title: 'Quiz Complete!',
+            text: "Congratulations! You've successfully completed the final quiz and demonstrated your understanding of key concepts in population dynamics. You're ready to explore the sandbox or start over to practice some more.",
+            keywords: [],
+            question: null,
+            options: null,
+            correctAnswer: null,
+            populationData: { rabbits: [], predators: [] },
+            carryingCapacity: null,
+            axisLabel: { y: '' }
+        }
+      };
+
+      const getSandboxData = () => {
+        let rabbitPopData = [sandboxSettings.initialPop];
+        let predatorPopData = sandboxSettings.predators === 'present' ? [Math.ceil(sandboxSettings.initialPop / 20)] : [];
+        let currentRabbitPop = sandboxSettings.initialPop;
+        let currentPredatorPop = sandboxSettings.predators === 'present' ? Math.ceil(sandboxSettings.initialPop / 20) : 0;
+        const timeSteps = 15;
+        const carryingCapacity = 150;
+
+        for (let i = 1; i < timeSteps; i++) {
+            let rabbitGrowthRate = 1.25;
+            let predatorGrowthRate = 1.0;
+
+            if (sandboxSettings.food === 'limited') {
+                rabbitGrowthRate = 1.1;
+            }
+
+            if (sandboxSettings.predators === 'present') {
+                const predatorImpact = (1 - (currentPredatorPop / 15));
+                rabbitGrowthRate = 1 + (0.5 * predatorImpact);
+                predatorGrowthRate = 1 + (0.05 * (currentRabbitPop / carryingCapacity));
+            }
+
+            currentRabbitPop = currentRabbitPop * rabbitGrowthRate;
+            currentPredatorPop = currentPredatorPop * predatorGrowthRate;
+
+            if (sandboxSettings.catastrophe && i === 5) {
+                currentRabbitPop = currentRabbitPop * 0.3;
+                currentPredatorPop = currentPredatorPop * 0.5;
+            }
+
+            currentRabbitPop = Math.max(0, Math.round(currentRabbitPop));
+            currentPredatorPop = Math.max(0, Math.round(currentPredatorPop));
+            currentPredatorPop = Math.min(currentPredatorPop, Math.ceil(currentRabbitPop / 5) + 1);
+
+            rabbitPopData.push(currentRabbitPop);
+            predatorPopData.push(currentPredatorPop);
+        }
+        return { rabbits: rabbitPopData, predators: predatorPopData };
+      };
+
+      React.useEffect(() => {
+        const canvas = canvasRef.current;
+
+        let populationData;
+        let carryingCapacity;
+        let axisLabelY = 'Rabbit Population';
+        let hasGraph = true;
+
+        if (stage === 'sandbox') {
+          populationData = getSandboxData();
+          if (sandboxSettings.predators === 'present') {
+            carryingCapacity = 150;
+          }
+        } else {
+          const currentStageData = stagesData[stage];
+          if (!currentStageData?.populationData?.rabbits?.length) {
+            hasGraph = false;
+            setVisiblePopulation(0);
+            setVisiblePredators(0);
+            return;
+          }
+          populationData = currentStageData.populationData;
+          carryingCapacity = currentStageData.carryingCapacity;
+          axisLabelY = currentStageData.axisLabel.y;
+        }
+
+        const ctx = canvas.getContext('2d');
+
+        const drawTimeout = setTimeout(() => {
+          const width = canvas.width;
+          const height = canvas.height;
+
+          ctx.clearRect(0, 0, width, height);
+          ctx.strokeStyle = '#6B7280';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(40, 10);
+          ctx.lineTo(40, height - 40);
+          ctx.lineTo(width - 10, height - 40);
+          ctx.stroke();
+
+          ctx.fillStyle = '#D1D5DB';
+          ctx.font = '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Time', width / 2, height - 20);
+          ctx.save();
+          ctx.translate(20, height / 2);
+          ctx.rotate(-Math.PI / 2);
+          ctx.fillText(axisLabelY, 0, 0);
+          ctx.restore();
+
+          const maxPop = 150 / zoomLevel;
+          const maxPredators = 20 / zoomLevel;
+
+          if (carryingCapacity) {
+            const ccY = height - 40 - (carryingCapacity / maxPop) * (height - 50);
+            ctx.strokeStyle = '#F87171';
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(40, ccY);
+            ctx.lineTo(width - 10, ccY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#F87171';
+            ctx.textAlign = 'right';
+            ctx.fillText(`K = ${carryingCapacity}`, width - 20, ccY - 5);
+          }
+
+          let i = 0;
+          const drawCurve = () => {
+            if (i < populationData.rabbits.length) {
+              ctx.strokeStyle = '#34D399';
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              const xUnit = (width - 50) / (populationData.rabbits.length - 1);
+              const yUnit = (height - 50) / maxPop;
+              ctx.moveTo(40 + (i > 0 ? (i - 1) * xUnit : 0), height - 40 - (i > 0 ? populationData.rabbits[i - 1] : populationData.rabbits[0]) * yUnit);
+              ctx.lineTo(40 + i * xUnit, height - 40 - populationData.rabbits[i] * yUnit);
+              ctx.stroke();
+
+              if (populationData.predators && populationData.predators.length > 0) {
+                ctx.strokeStyle = '#FDBA74';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                const predatorYUnit = (height - 50) / maxPredators;
+                ctx.moveTo(40 + (i > 0 ? (i - 1) * xUnit : 0), height - 40 - (i > 0 ? populationData.predators[i - 1] : populationData.predators[0]) * predatorYUnit);
+                ctx.lineTo(40 + i * xUnit, height - 40 - populationData.predators[i] * predatorYUnit);
+                ctx.stroke();
+              }
+
+              const scaledPop = Math.ceil(populationData.rabbits[i] / 10);
+              setVisiblePopulation(scaledPop);
+              const scaledPredators = populationData.predators && populationData.predators[i] ? Math.ceil(populationData.predators[i] / 1.5) : 0;
+              setVisiblePredators(scaledPredators);
+
+              i++;
+              setTimeout(drawCurve, animationSpeed);
+            }
+          };
+          drawCurve();
+        }, animationSpeed);
+
+        return () => clearTimeout(drawTimeout);
+      }, [stage, animationSpeed, sandboxSettings, zoomLevel]);
+
+      const handleAnswer = (selectedOption) => {
+        setUserAnswer(null);
+        setFeedback({ message: '', isCorrect: false });
+
+        const currentStageData = stagesData[stage];
+        if (selectedOption === currentStageData.correctAnswer) {
+          setFeedback({ message: 'Correct! You got it.', isCorrect: true });
+          setCanContinue(true);
+          setUserAnswer(selectedOption);
+        } else {
+          setFeedback({ message: "Oops, that's not quite right. Try again.", isCorrect: false });
+          setCanContinue(false);
+        }
+      };
+
+      const handleSpeedChange = (event) => {
+        setAnimationSpeed(Number(event.target.value));
+      };
+
+      const handleZoomChange = (event) => {
+        setZoomLevel(Number(event.target.value));
+      };
+
+      const handleSandboxChange = (key, value) => {
+        setSandboxSettings(prev => ({ ...prev, [key]: value }));
+      };
+
+      const handleNext = () => {
+        setUserAnswer(null);
+        setFeedback({ message: '', isCorrect: false });
+        setCanContinue(false);
+        if (stage === 'sandbox') {
+          setStage('intro-concept');
+        } else if (stage === 'intro-concept') {
+          setStage('intro');
+        } else if (stage === 'intro') {
+          setStage('stage1');
+        } else if (stage === 'stage1') {
+          setStage('stage2');
+        } else if (stage === 'stage2') {
+          setStage('stage2-intro');
+        } else if (stage === 'stage2-intro') {
+          setStage('stage3');
+        } else if (stage === 'stage3') {
+          setStage('conclusion');
+        } else if (stage === 'conclusion') {
+          setStage('quiz-1');
+        } else if (stage === 'quiz-1') {
+            setStage('quiz-2');
+        } else if (stage === 'quiz-2') {
+            setStage('quiz-3');
+        } else if (stage === 'quiz-3') {
+            setStage('quiz-complete');
+        } else if (stage === 'quiz-complete') {
+          setStage('sandbox');
+          setSandboxSettings({
+            initialPop: 20,
+            food: 'abundant',
+            predators: 'absent',
+            catastrophe: false,
+          });
+        } else {
+          setStage('sandbox');
+        }
+      };
+
+      const renderContent = () => {
+        const isSandbox = stage === 'sandbox';
+        const isQuizComplete = stage === 'quiz-complete';
+
+        if (isSandbox) {
+            const sandboxData = getSandboxData();
+            const currentRabbitPop = sandboxData.rabbits.length > 0 ? sandboxData.rabbits[sandboxData.rabbits.length - 1] : sandboxSettings.initialPop;
+            const currentPredatorPop = sandboxData.predators && sandboxData.predators.length > 0 ? sandboxData.predators[sandboxData.predators.length - 1] : 0;
+
+            return React.createElement(
+              'div',
+              { className: 'space-y-6 animate-fadeIn' },
+              React.createElement('h2', { className: 'text-3xl font-bold text-teal-400 text-center' }, 'Population Sandbox'),
+              React.createElement('p', { className: 'text-gray-300 text-center max-w-2xl mx-auto' }, 'Adjust the controls below to see how different factors impact a population\'s growth.'),
+              React.createElement(
+                'div',
+                { className: 'flex flex-row gap-6' },
+                React.createElement(
+                  'div',
+                  { className: 'bg-gray-700 rounded-2xl p-4 shadow-inner border border-gray-600 flex-1 flex flex-col items-center justify-center space-y-4' },
+                  React.createElement('h3', { className: 'text-xl font-bold text-teal-300' }, 'Controls'),
+                  React.createElement(
+                    'div',
+                    { className: 'w-full space-y-4' },
+                    React.createElement(
+                      'label',
+                      { className: 'block' },
+                      React.createElement('span', { className: 'text-gray-400' }, 'Initial Population: ', sandboxSettings.initialPop),
+                      React.createElement('input', {
+                        type: 'range',
+                        min: '1',
+                        max: '100',
+                        value: sandboxSettings.initialPop,
+                        onChange: (e) => handleSandboxChange('initialPop', Number(e.target.value)),
+                        className: 'w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer',
+                      })
+                    ),
+                    React.createElement(
+                      'label',
+                      { className: 'block' },
+                      React.createElement('span', { className: 'text-gray-400' }, 'Food Availability:'),
+                      React.createElement(
+                        'div',
+                        { className: 'flex justify-between mt-2' },
+                        React.createElement(
+                          'button',
+                          {
+                            onClick: () => handleSandboxChange('food', 'abundant'),
+                            className: `px-4 py-2 rounded-lg font-semibold transition-colors ${sandboxSettings.food === 'abundant' ? 'bg-teal-500 text-gray-900' : 'bg-gray-800 text-gray-200'}`,
+                          },
+                          'Abundant'
+                        ),
+                        React.createElement(
+                          'button',
+                          {
+                            onClick: () => handleSandboxChange('food', 'limited'),
+                            className: `px-4 py-2 rounded-lg font-semibold transition-colors ${sandboxSettings.food === 'limited' ? 'bg-teal-500 text-gray-900' : 'bg-gray-800 text-gray-200'}`,
+                          },
+                          'Limited'
+                        )
+                      )
+                    ),
+                    React.createElement(
+                      'label',
+                      { className: 'block' },
+                      React.createElement('span', { className: 'text-gray-400' }, 'Predators:'),
+                      React.createElement(
+                        'div',
+                        { className: 'flex justify-between mt-2' },
+                        React.createElement(
+                          'button',
+                          {
+                            onClick: () => handleSandboxChange('predators', 'absent'),
+                            className: `px-4 py-2 rounded-lg font-semibold transition-colors ${sandboxSettings.predators === 'absent' ? 'bg-teal-500 text-gray-900' : 'bg-gray-800 text-gray-200'}`,
+                          },
+                          'Absent'
+                        ),
+                        React.createElement(
+                          'button',
+                          {
+                            onClick: () => handleSandboxChange('predators', 'present'),
+                            className: `px-4 py-2 rounded-lg font-semibold transition-colors ${sandboxSettings.predators === 'present' ? 'bg-teal-500 text-gray-900' : 'bg-gray-800 text-gray-200'}`,
+                          },
+                          'Present'
+                        )
+                      )
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        onClick: () => handleSandboxChange('catastrophe', !sandboxSettings.catastrophe),
+                        className: `w-full px-4 py-2 rounded-lg font-semibold transition-colors ${sandboxSettings.catastrophe ? 'bg-red-500 text-gray-900' : 'bg-gray-800 text-gray-200'}`,
+                      },
+                      sandboxSettings.catastrophe ? 'Catastrophe On' : 'Trigger Catastrophe'
+                    )
+                  )
+                ),
+                React.createElement(
+                  'div',
+                  { className: 'flex flex-col flex-1 gap-4' },
+                  React.createElement(
+                    'div',
+                    { className: 'bg-gray-700 rounded-2xl p-4 shadow-inner border border-gray-600 flex-1' },
+                    React.createElement('canvas', { ref: canvasRef, width: '600', height: '350', className: 'w-full h-auto bg-gray-800 rounded-xl border border-gray-600' })
+                  ),
+                  React.createElement(
+                    'div',
+                    { className: 'flex flex-col gap-4' },
+                    React.createElement(
+                      'div',
+                      { className: 'bg-gray-700 rounded-2xl p-4 shadow-inner border border-gray-600 relative' },
+                      React.createElement(
+                        'div',
+                        { className: 'text-center mb-2' },
+                        React.createElement('h3', { className: 'text-xl font-bold text-teal-300' }, `Rabbit Population: ${currentRabbitPop}`)
+                      ),
+                      React.createElement(
+                        'div',
+                        { className: 'h-28 overflow-auto flex flex-wrap gap-2 justify-center' },
+                        Array.from({ length: visiblePopulation }).map((_, index) =>
+                          React.createElement('span', { key: `rabbit-${index}`, className: 'text-3xl animate-fadeInDelay', style: { animationDelay: `${index * 50}ms` } }, '🐰')
+                        )
+                      )
+                    ),
+                    sandboxSettings.predators === 'present' &&
+                      React.createElement(
+                        'div',
+                        { className: 'bg-gray-700 rounded-2xl p-4 shadow-inner border border-gray-600 relative' },
+                        React.createElement(
+                          'div',
+                          { className: 'text-center mb-2' },
+                          React.createElement('h3', { className: 'text-xl font-bold text-orange-300' }, `Predator Population: ${currentPredatorPop}`)
+                        ),
+                        React.createElement(
+                          'div',
+                          { className: 'h-28 overflow-auto flex flex-wrap gap-2 justify-center' },
+                          Array.from({ length: visiblePredators }).map((_, index) =>
+                            React.createElement('span', { key: `predator-${index}`, className: 'text-3xl animate-fadeInDelay', style: { animationDelay: `${index * 50}ms` } }, '🦊')
+                          )
+                        )
+                      )
+                  )
+                )
+              ),
+              React.createElement(
+                'div',
+                { className: 'flex justify-center mt-8' },
+                React.createElement(
+                  'button',
+                  {
+                    onClick: handleNext,
+                    className: 'px-6 py-3 bg-teal-500 text-gray-900 font-bold rounded-full transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-teal-500 focus:ring-opacity-50',
+                  },
+                  'Start Simulation'
+                )
+              )
+            );
+        } else {
+            const currentStageData = stagesData[stage];
+            const hasGraph = currentStageData?.populationData?.rabbits?.length > 0;
+            const currentRabbitPop = hasGraph ? currentStageData.populationData.rabbits[currentStageData.populationData.rabbits.length - 1] : 0;
+            const currentPredatorPop = hasGraph && currentStageData.populationData?.predators?.length > 0 ? currentStageData.populationData.predators[currentStageData.populationData.predators.length - 1] : 0;
+
+            return React.createElement(
+              'div',
+              { className: 'space-y-6 animate-fadeIn' },
+              React.createElement('h2', { className: 'text-3xl font-bold text-teal-400 text-center' }, currentStageData.title),
+              React.createElement(KeywordText, { text: currentStageData.text, keywords: currentStageData.keywords }),
+              hasGraph &&
+                React.createElement(
+                  'div',
+                  { className: 'flex flex-col sm:flex-row items-center gap-4 justify-center' },
+                  React.createElement(
+                    'div',
+                    { className: 'flex flex-col items-center gap-2 w-full sm:w-1/2' },
+                    React.createElement('label', { htmlFor: 'speed-slider', className: 'text-gray-400' }, 'Animation Speed'),
+                    React.createElement('input', {
+                      id: 'speed-slider',
+                      type: 'range',
+                      min: '50',
+                      max: '1000',
+                      step: '50',
+                      value: animationSpeed,
+                      onChange: handleSpeedChange,
+                      className: 'w-full max-w-sm h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer',
+                    }),
+                    React.createElement('span', { className: 'text-gray-400 text-sm' }, `${animationSpeed}ms`)
+                  ),
+                  React.createElement(
+                    'div',
+                    { className: 'flex flex-col items-center gap-2 w-full sm:w-1/2' },
+                    React.createElement('label', { htmlFor: 'zoom-slider', className: 'text-gray-400' }, 'Graph Zoom'),
+                    React.createElement('input', {
+                      id: 'zoom-slider',
+                      type: 'range',
+                      min: '0.5',
+                      max: '2.5',
+                      step: '0.1',
+                      value: zoomLevel,
+                      onChange: handleZoomChange,
+                      className: 'w-full max-w-sm h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer',
+                    }),
+                    React.createElement('span', { className: 'text-gray-400 text-sm' }, `${zoomLevel.toFixed(1)}x`)
+                  )
+                ),
+              React.createElement(
+                'div',
+                { className: 'flex flex-row gap-6 mt-6' },
+                React.createElement(
+                  'div',
+                  { className: 'bg-gray-700 rounded-2xl p-4 shadow-inner border border-gray-600 flex-1' },
+                  hasGraph ?
+                    React.createElement('canvas', { ref: canvasRef, width: '600', height: '350', className: 'w-full h-auto bg-gray-800 rounded-xl border border-gray-600' }) :
+                    React.createElement(
+                      'div',
+                      { className: 'w-full h-[350px] bg-gray-800 rounded-xl border border-gray-600 flex items-center justify-center' },
+                      React.createElement('p', { className: 'text-gray-400 text-center text-lg px-4' }, 'This concept does not have a graph. Press continue to move on.')
+                    )
+                ),
+                React.createElement(
+                  'div',
+                  { className: 'flex flex-col flex-1 gap-4' },
+                  React.createElement(
+                    'div',
+                    { className: 'bg-gray-700 rounded-2xl p-4 shadow-inner border border-gray-600 relative' },
+                    React.createElement(
+                      'div',
+                      { className: 'text-center mb-2' },
+                      React.createElement('h3', { className: 'text-xl font-bold text-teal-300' }, `Rabbit Population: ${currentRabbitPop}`)
+                    ),
+                    React.createElement(
+                      'div',
+                      { className: 'h-28 overflow-auto flex flex-wrap gap-2 justify-center' },
+                      Array.from({ length: visiblePopulation }).map((_, index) =>
+                        React.createElement('span', { key: index, className: 'text-3xl animate-fadeInDelay', style: { animationDelay: `${index * 50}ms` } }, '🐰')
+                      )
+                    )
+                  ),
+                  currentStageData?.populationData?.predators?.length > 0 &&
+                    React.createElement(
+                      'div',
+                      { className: 'bg-gray-700 rounded-2xl p-4 shadow-inner border border-gray-600 relative' },
+                      React.createElement(
+                        'div',
+                        { className: 'text-center mb-2' },
+                        React.createElement('h3', { className: 'text-xl font-bold text-orange-300' }, `Predator Population: ${currentPredatorPop}`)
+                      ),
+                      React.createElement(
+                        'div',
+                        { className: 'h-28 overflow-auto flex flex-wrap gap-2 justify-center' },
+                        Array.from({ length: visiblePredators }).map((_, index) =>
+                          React.createElement('span', { key: index, className: 'text-3xl animate-fadeInDelay', style: { animationDelay: `${index * 50}ms` } }, '🦊')
+                        )
+                      )
+                    )
+                )
+              ),
+              currentStageData.question &&
+                React.createElement(
+                  React.Fragment,
+                  null,
+                  React.createElement('p', { className: 'font-semibold text-lg text-gray-100 mb-2' }, currentStageData.question),
+                  React.createElement(
+                    'div',
+                    { className: 'grid grid-cols-1 sm:grid-cols-3 gap-4' },
+                    currentStageData.options.map((option, index) =>
+                      React.createElement(
+                        'button',
+                        {
+                          key: index,
+                          onClick: () => handleAnswer(option),
+                          className: `w-full text-left p-4 rounded-xl border-2 transition-all duration-200
+                            ${userAnswer === option
+                              ? (feedback.isCorrect ? 'bg-green-600 border-green-600 text-gray-100 font-bold' : 'bg-red-600 border-red-600 text-gray-100 font-bold')
+                              : 'bg-gray-800 border-gray-600 text-gray-200 hover:bg-gray-600'
+                            }`,
+                        },
+                        option
+                      )
+                    )
+                  ),
+                  feedback.message &&
+                    React.createElement(
+                      'div',
+                      { className: `mt-4 p-3 rounded-lg text-sm text-center font-semibold
+                        ${feedback.isCorrect ? 'bg-green-500 text-gray-900' : 'bg-red-500 text-gray-900'}` },
+                      feedback.message
+                    )
+                ),
+              React.createElement(
+                'div',
+                { className: 'flex flex-col sm:flex-row justify-center gap-4 mt-8' },
+                React.createElement(
+                  'button',
+                  {
+                    onClick: handleNext,
+                    className: `px-6 py-3 bg-teal-500 text-gray-900 font-bold rounded-full transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-teal-500 focus:ring-opacity-50
+                      ${!canContinue && currentStageData.question && 'opacity-50 cursor-not-allowed'}`,
+                    disabled: !canContinue && currentStageData.question,
+                  },
+                  isQuizComplete ? 'Start Over' : 'Continue'
+                )
+              )
+            );
+        }
+      };
+
+      return React.createElement(
+        'div',
+        { className: 'min-h-screen bg-gray-900 text-gray-100 p-8 flex items-center justify-center font-sans' },
+        React.createElement(
+          'div',
+          { className: 'bg-gray-800 rounded-3xl shadow-2xl p-8 w-full max-w-4xl border border-gray-700' },
+          renderContent()
+        )
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>
+
